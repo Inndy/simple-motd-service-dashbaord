@@ -1,0 +1,95 @@
+#!/bin/bash
+
+#
+#  SIMPLE SERVICE DASHBOARD FRAMEWORK
+#
+# https://github.com/Inndy/simple-service-dashbaord
+# created by Inndy Lin <inndy.tw@gmail.com>
+
+SERVICE_CHECKER_PATH=/etc/simple-service-dashboard
+# use $HOME/.svc if you execute this script in your .bashrc
+
+NC=$'\033[0m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+L_PURPLE=$'\033[1;35m'
+
+svc_bad() {
+	echo " 🔴 | ${L_PURPLE}$1${NC} is ${RED}down${NC}"
+}
+
+svc_good() {
+	echo " 🟢 | ${L_PURPLE}$1${NC} is ${GREEN}online${NC}"
+}
+
+svc_problem() {
+	echo " 🟡 | ${L_PURPLE}$1${NC} had some ${YELLOW}problem${NC}"
+}
+
+svc_check() {
+	svc_name="$1"
+	shift
+	svc_checker="$1"
+	shift
+
+	$svc_checker "$@" >> /dev/null 2>/dev/null
+	ret=$?
+
+	if [ $ret -eq 0 ]
+	then
+		svc_good "$svc_name"
+	elif [ $ret -eq 1 ]
+	then
+		svc_problem "$svc_name"
+	else
+		svc_bad "$svc_name"
+	fi
+}
+
+# create tmux session using: tmux new-session -t $SESSION_NAME
+do_svc_detect_tmux_session() {
+	tmux list-windows -t "$1" || return 3
+}
+
+do_svc_check_systemd_service() {
+	systemctl status "$1".service || return 3
+}
+
+# usage:
+#   do_svc_check_listen_port udp :53
+#   do_svc_check_listen_port tcp 0.0.0.0:443
+do_svc_check_listen_port() {
+	ss -l -n | grep "^$1" | awk '{print $5}' | grep -F "$2" || return 3
+}
+
+[ -d "$SERVICE_CHECKER_PATH" ] && \
+	for script in $(ls "$SERVICE_CHECKER_PATH/")
+	do
+		file="$SERVICE_CHECKER_PATH/$script"
+		[ -f "$file" -a -r "$file" ] && . "$file"
+	done
+
+true<<__EOF__ # following is a sample test script
+do_returnval() {
+	return $1
+}
+
+do_check_nginx() {
+	systemctl status nginx || return 2
+}
+
+do_check_ssh_agent() {
+	pgrep '^ssh-agent$' || return 2
+}
+
+svc_check "ssh-agent" do_check_ssh_agent
+
+svc_check "ret0" do_returnval 0
+svc_check "ret1" do_returnval 1
+svc_check "ret2" do_returnval 2
+
+svc_check "nginx" do_check_nginx
+svc_check "tmux for c2" do_svc_detect_tmux_session op1-c2
+svc_check "ssh server" do_svc_check_listen_port tcp :22
+__EOF__
